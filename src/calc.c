@@ -117,7 +117,25 @@ static ModeMode calc_mode_result(Mode* sw, int menu_entry, G_GNUC_UNUSED char** 
         }
         retv = RELOAD_DIALOG;
     } else if ((menu_entry & MENU_OK) && selected_line > 0) {
-        printf("%s\n", (char*)g_ptr_array_index(pd->history, get_real_history_index(pd->history, selected_line)));
+        void* result = g_ptr_array_index(pd->history, 
+            get_real_history_index(pd->history, selected_line));
+
+        GError *error = NULL;
+        const gchar* const argv[] = { "/usr/bin/xclip", "-selection", "clipboard", NULL };
+        GSubprocess* process = g_subprocess_newv(argv, 
+            G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE, &error);
+
+        if (error != NULL) {
+            g_error("Spawning child failed: %s", error->message);
+            g_error_free(error);
+        }
+
+        GOutputStream* output_stream = g_subprocess_get_stdin_pipe(process);
+        g_output_stream_write_all(output_stream, result, 
+            strlen(result), NULL, NULL, NULL);
+
+        g_output_stream_close(output_stream, NULL, NULL);
+
         retv = MODE_EXIT;
     } else if (menu_entry & MENU_ENTRY_DELETE) {
         if (selected_line > 0) {
