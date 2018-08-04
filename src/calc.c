@@ -47,6 +47,7 @@ G_MODULE_EXPORT Mode mode;
 typedef struct
 {
     char* last_result;
+    char* last_computed;
     GPtrArray* history;
 } CALCModePrivateData;
 
@@ -58,6 +59,7 @@ static void get_calc(Mode* sw)
      */
     CALCModePrivateData* pd = (CALCModePrivateData*)mode_get_private_data(sw);
     pd->last_result = g_strdup("");
+    pd->last_computed = g_strdup("");
     pd->history = g_ptr_array_new();
 }
 
@@ -81,8 +83,7 @@ static unsigned int calc_mode_get_num_entries(const Mode* sw)
 {
     const CALCModePrivateData* pd = (const CALCModePrivateData*)mode_get_private_data(sw);
 
-    // Add +1 because we put a static message into the history array as well.
-    return pd->history->len; // + 2;
+    return pd->history->len;
 }
 
 
@@ -154,25 +155,25 @@ static ModeMode calc_mode_result(Mode* sw, int menu_entry, G_GNUC_UNUSED char** 
         retv = PREVIOUS_DIALOG;
     } else if (menu_entry & MENU_QUICK_SWITCH) {
         retv = (menu_entry & MENU_LOWER_MASK);
-    } else if (menu_entry & MENU_OK) {
-        g_debug("--- Copy from history");
-        const char* result = get_only_result_part((const char **)&g_ptr_array_index(pd->history, get_real_history_index(pd->history, selected_line)));
-        copy_only_result_to_clipboard(result);
-
-        retv = MODE_EXIT;
-    }else if ( menu_entry & MENU_CUSTOM_ACTION ){
+    } else if ( menu_entry & MENU_CUSTOM_ACTION ){
+        // Add to history
         if (!is_error_string(pd->last_result) && strlen(pd->last_result) > 0) {
-        char* history_entry = g_strdup_printf("%s", pd->last_result);
-        g_ptr_array_add(pd->history, (gpointer) history_entry);
+            char* history_entry = g_strdup_printf("%s", pd->last_result);
+            g_ptr_array_add(pd->history, (gpointer) history_entry);
         }
         retv = RESET_DIALOG;
+    }else if (menu_entry & MENU_OK) {
+        // Copy to clipboard and exit
+        const char* result = get_only_result_part((const char **)&g_ptr_array_index(pd->history, get_real_history_index(pd->history, selected_line)));
+        copy_only_result_to_clipboard(result);
+        retv = MODE_EXIT;
     }else if ( ((menu_entry & MENU_CUSTOM_INPUT) && selected_line == -1u)) {
-         g_debug("---Copy first time");
-            if (!is_error_string(pd->last_result) && strlen(pd->last_result) > 0) {
+        // Copy to clip board and exit (when no history)
+        if (!is_error_string(pd->last_result) && strlen(pd->last_result) > 0) {
             const char* result = get_only_result_part((const char **)&pd->last_result);
             copy_only_result_to_clipboard(result);
-            }
-            retv = MODE_EXIT;
+        }
+        retv = MODE_EXIT;
     }else if (menu_entry & MENU_ENTRY_DELETE) {
         if (selected_line > 0) {
             g_ptr_array_remove_index(pd->history, get_real_history_index(pd->history, selected_line));
@@ -211,11 +212,6 @@ static char* calc_get_display_value(const Mode* sw, unsigned int selected_line, 
         return NULL;
     }
 
-//    if (selected_line == 0) {
-//        return g_strdup("Copy to clipboard and exit");
-//    }else if (selected_line == 1) {
-//        return g_strdup("Add to history");
-//    }
     unsigned int real_index = get_real_history_index(pd->history, selected_line);
     return g_strdup(g_ptr_array_index(pd->history, real_index));
 }
@@ -274,6 +270,10 @@ static char* calc_preprocess_input(Mode* sw, const char* input)
 {
     GError *error = NULL;
     CALCModePrivateData* pd = (CALCModePrivateData*)mode_get_private_data(sw);
+    if ( strcmp(input,pd->last_computed) == 0 ){
+        // Skip computation because it has been already computed
+        return NULL;
+    }
 
     const gchar* const argv[] = { "/usr/bin/qalc", "+u8", "-nocurrencies", NULL };
     GSubprocess* process = g_subprocess_newv(argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE | G_SUBPROCESS_FLAGS_STDIN_PIPE, &error);
@@ -297,6 +297,9 @@ static char* calc_preprocess_input(Mode* sw, const char* input)
     g_output_stream_close (stdin_stream, NULL, NULL);
 
     g_subprocess_wait_check_async(process, NULL, process_cb, (gpointer)&pd->last_result);
+
+    free(pd->last_computed);
+    pd->last_computed = g_strdup(input);
 
     return g_strdup(input);
 }
