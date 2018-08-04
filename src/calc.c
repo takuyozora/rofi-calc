@@ -161,7 +161,7 @@ static ModeMode calc_mode_result(Mode* sw, int menu_entry, G_GNUC_UNUSED char** 
             char* history_entry = g_strdup_printf("%s", pd->last_result);
             g_ptr_array_add(pd->history, (gpointer) history_entry);
         }
-        retv = RELOAD_DIALOG;
+        retv = RESET_DIALOG;
     } else if ((menu_entry & MENU_OK) && selected_line > 1) {
         const char* result = get_only_result_part((const char **)&g_ptr_array_index(pd->history, get_real_history_index(pd->history, selected_line)));
         copy_only_result_to_clipboard(result);
