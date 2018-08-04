@@ -99,6 +99,48 @@ static int get_real_history_index(GPtrArray* history, unsigned int selected_line
 }
 
 
+static const char* get_only_result_part(const char* string){
+    if (string == NULL) return NULL;
+    const char* result = NULL;
+    for (int i = 0; ; i++){
+        if (string[i] == '\0')
+            break;
+        if (string[i] == '='){
+            result = &(string[i+2]);
+        }
+        i++;
+    }
+    return result;
+}
+
+
+static void copy_only_result_to_clipboard(CALCModePrivateData* pd, unsigned int selected_line){
+    const char* result = get_only_result_part((const char *)g_ptr_array_index(pd->history,
+                                                                              get_real_history_index(pd->history, selected_line)));
+
+    if (result != NULL){
+        GError *error = NULL;
+
+        const gchar *const argv[] = {"/usr/bin/xclip", "-selection", "clipboard", NULL};
+        GSubprocess *process = g_subprocess_newv(argv,
+                                                 G_SUBPROCESS_FLAGS_STDIN_PIPE |
+                                                 G_SUBPROCESS_FLAGS_STDERR_MERGE, &error);
+
+        if (error != NULL) {
+            g_error("Spawning child failed: %s", error->message);
+            g_error_free(error);
+        }
+
+        GOutputStream *output_stream = g_subprocess_get_stdin_pipe(process);
+        g_output_stream_write_all(output_stream, result,
+                                  strlen(result), NULL, NULL, NULL
+        );
+
+        g_output_stream_close(output_stream, NULL, NULL);
+    }
+}
+
+
 static ModeMode calc_mode_result(Mode* sw, int menu_entry, G_GNUC_UNUSED char** input, unsigned int selected_line)
 {
     ModeMode retv = MODE_EXIT;
@@ -114,27 +156,11 @@ static ModeMode calc_mode_result(Mode* sw, int menu_entry, G_GNUC_UNUSED char** 
         if (!is_error_string(pd->last_result) && strlen(pd->last_result) > 0) {
             char* history_entry = g_strdup_printf("%s", pd->last_result);
             g_ptr_array_add(pd->history, (gpointer) history_entry);
+            copy_only_result_to_clipboard(pd, selected_line);
         }
         retv = RELOAD_DIALOG;
     } else if ((menu_entry & MENU_OK) && selected_line > 0) {
-        void* result = g_ptr_array_index(pd->history, 
-            get_real_history_index(pd->history, selected_line));
-
-        GError *error = NULL;
-        const gchar* const argv[] = { "/usr/bin/xclip", "-selection", "clipboard", NULL };
-        GSubprocess* process = g_subprocess_newv(argv, 
-            G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE, &error);
-
-        if (error != NULL) {
-            g_error("Spawning child failed: %s", error->message);
-            g_error_free(error);
-        }
-
-        GOutputStream* output_stream = g_subprocess_get_stdin_pipe(process);
-        g_output_stream_write_all(output_stream, result, 
-            strlen(result), NULL, NULL, NULL);
-
-        g_output_stream_close(output_stream, NULL, NULL);
+        copy_only_result_to_clipboard(pd, selected_line);
 
         retv = MODE_EXIT;
     } else if (menu_entry & MENU_ENTRY_DELETE) {
