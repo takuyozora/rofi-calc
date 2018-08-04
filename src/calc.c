@@ -37,6 +37,8 @@
 
 #include <stdint.h>
 
+#define ANS "ans"
+
 G_MODULE_EXPORT Mode mode;
 
 /**
@@ -100,20 +102,15 @@ static int get_real_history_index(GPtrArray* history, unsigned int selected_line
 }
 
 
-const char* get_only_result_part(const char** string){
+static const char* get_only_result_part(const char** string){
     if (*string == NULL){
-        return NULL;
+        return (const char *)1;
     }
-    const char* result = *string;
-    for (int i = 0; ; i++){
-        if (result[i] == '\0'){
-            return NULL;
-        }
-        if (result[i] == '='){
-            return &result[i+2];
-        }
-        i++;
+    const char* r = strchr(*string, '=');
+    if (r == NULL){
+        return (const char *)2;
     }
+    return &r[2]    ;
 }
 
 
@@ -248,8 +245,22 @@ static void process_cb(GObject* source_object, GAsyncResult* res, gpointer user_
         g_error_free(error);
     }
 
-    unsigned int line_length = strcspn(stdout_buf, "\n");
-    *last_result = g_strndup(stdout_buf, line_length);
+    // Check if there is an 'ans' variable
+    const char* result = NULL;
+    int ans = strncmp(stdout_buf, "> ans:=", 7);
+    if (ans != 0){
+        // No 'ans' variable, continue to proceed normally
+        result = (const char *)stdout_buf;
+    }else{
+        // 'ans' variable, go until result
+        result = strstr(stdout_buf, "\n\n>")+3;
+    }
+
+    // Skip the part with the question and go to the answer
+    result = strstr(result, "\n\n  ")+4;
+
+    unsigned int line_length = strcspn(result, "\n");
+    *last_result = g_strndup(result, line_length);
     rofi_view_reload();
 }
 
@@ -258,13 +269,26 @@ static char* calc_preprocess_input(Mode* sw, const char* input)
     GError *error = NULL;
     CALCModePrivateData* pd = (CALCModePrivateData*)mode_get_private_data(sw);
 
-    const gchar* const argv[] = { "/usr/bin/qalc", "+u8", "-nocurrencies", input, NULL };
-    GSubprocess* process = g_subprocess_newv(argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE, &error);
+    const gchar* const argv[] = { "/usr/bin/qalc", "+u8", "-nocurrencies", NULL };
+    GSubprocess* process = g_subprocess_newv(argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE | G_SUBPROCESS_FLAGS_STDIN_PIPE, &error);
 
     if (error != NULL) {
         g_error("Spawning child failed: %s", error->message);
         g_error_free(error);
     }
+
+    GOutputStream * stdin_stream = g_subprocess_get_stdin_pipe(process);
+
+    if (pd->history->len > 0) {
+        // Add 'ans' variable with the last history
+        char *cmd = g_strdup_printf("ans:=%s\n", get_only_result_part(
+            (const char **) &g_ptr_array_index(pd->history, pd->history->len - 1)));
+        g_output_stream_write(stdin_stream, (const void *) cmd, strlen(cmd), NULL, NULL);
+    }
+
+    // Send input to qalc
+    g_output_stream_write (stdin_stream, (const void *)input, strlen(input), NULL, NULL);
+    g_output_stream_close (stdin_stream, NULL, NULL);
 
     g_subprocess_wait_check_async(process, NULL, process_cb, (gpointer)&pd->last_result);
 
