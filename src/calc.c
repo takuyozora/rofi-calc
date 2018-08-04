@@ -104,13 +104,18 @@ static int get_real_history_index(GPtrArray* history, unsigned int selected_line
 
 static const char* get_only_result_part(const char** string){
     if (*string == NULL){
-        return (const char *)1;
+        return NULL;
     }
     const char* r = strchr(*string, '=');
     if (r == NULL){
-        return (const char *)2;
+        return NULL;
     }
-    return &r[2]    ;
+    const char* approx = strstr(*string, "approx.");
+    if (approx != NULL){
+        return &approx[8];
+    }else {
+        return &r[2];
+    }
 }
 
 
