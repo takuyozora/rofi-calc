@@ -80,7 +80,7 @@ static unsigned int calc_mode_get_num_entries(const Mode* sw)
     const CALCModePrivateData* pd = (const CALCModePrivateData*)mode_get_private_data(sw);
 
     // Add +1 because we put a static message into the history array as well.
-    return pd->history->len + 1;
+    return pd->history->len + 2;
 }
 
 
@@ -95,28 +95,29 @@ static gboolean is_error_string(char* str)
 
 static int get_real_history_index(GPtrArray* history, unsigned int selected_line)
 {
-    return history->len - selected_line;
+    // +1 because of the two command line displayed (copy to clipboard and add to history)
+    return history->len - selected_line + 1;
 }
 
 
-static const char* get_only_result_part(const char* string){
-    if (string == NULL) return NULL;
-    const char* result = NULL;
+const char* get_only_result_part(const char** string){
+    if (*string == NULL){
+        return NULL;
+    }
+    const char* result = *string;
     for (int i = 0; ; i++){
-        if (string[i] == '\0')
-            break;
-        if (string[i] == '='){
-            result = &(string[i+2]);
+        if (result[i] == '\0'){
+            return NULL;
+        }
+        if (result[i] == '='){
+            return &result[i+2];
         }
         i++;
     }
-    return result;
 }
 
 
-static void copy_only_result_to_clipboard(CALCModePrivateData* pd, unsigned int selected_line){
-    const char* result = get_only_result_part((const char *)g_ptr_array_index(pd->history,
-                                                                              get_real_history_index(pd->history, selected_line)));
+static void copy_only_result_to_clipboard(const char* result){
 
     if (result != NULL){
         GError *error = NULL;
@@ -151,16 +152,22 @@ static ModeMode calc_mode_result(Mode* sw, int menu_entry, G_GNUC_UNUSED char** 
         retv = PREVIOUS_DIALOG;
     } else if (menu_entry & MENU_QUICK_SWITCH) {
         retv = (menu_entry & MENU_LOWER_MASK);
-    } else if (((menu_entry & MENU_OK) && selected_line == 0) ||
-               ((menu_entry & MENU_CUSTOM_INPUT) && selected_line == -1u)) {
+    } else if ((menu_entry & MENU_OK) && selected_line == 0) {
+        if (!is_error_string(pd->last_result) && strlen(pd->last_result) > 0) {
+            const char* result = get_only_result_part((const char **)&pd->last_result);
+            copy_only_result_to_clipboard(result);
+        }
+        retv = MODE_EXIT;
+    } else if (((menu_entry & MENU_OK) && selected_line == 1) ||
+                ((menu_entry & MENU_CUSTOM_INPUT) && selected_line == -1u)) {
         if (!is_error_string(pd->last_result) && strlen(pd->last_result) > 0) {
             char* history_entry = g_strdup_printf("%s", pd->last_result);
             g_ptr_array_add(pd->history, (gpointer) history_entry);
-            copy_only_result_to_clipboard(pd, selected_line);
         }
         retv = RELOAD_DIALOG;
-    } else if ((menu_entry & MENU_OK) && selected_line > 0) {
-        copy_only_result_to_clipboard(pd, selected_line);
+    } else if ((menu_entry & MENU_OK) && selected_line > 1) {
+        const char* result = get_only_result_part((const char **)&g_ptr_array_index(pd->history, get_real_history_index(pd->history, selected_line)));
+        copy_only_result_to_clipboard(result);
 
         retv = MODE_EXIT;
     } else if (menu_entry & MENU_ENTRY_DELETE) {
@@ -202,6 +209,8 @@ static char* calc_get_display_value(const Mode* sw, unsigned int selected_line, 
     }
 
     if (selected_line == 0) {
+        return g_strdup("Copy to clipboard and exit");
+    }else if (selected_line == 1) {
         return g_strdup("Add to history");
     }
     unsigned int real_index = get_real_history_index(pd->history, selected_line);
@@ -268,7 +277,7 @@ static char *calc_get_message ( const Mode *sw )
     if (is_error_string(pd->last_result)) {
         return g_markup_printf_escaped("<span foreground='PaleVioletRed'>%s</span>", pd->last_result);
     }
-    return g_markup_printf_escaped("Result: <b>%s</b>", pd->last_result);
+    return g_markup_printf_escaped("Result: <b>%s</b>\n<b>Ctrl+Enter</b>To add to history", pd->last_result);
 }
 
 Mode mode =
